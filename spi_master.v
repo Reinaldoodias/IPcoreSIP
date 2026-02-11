@@ -20,4 +20,8 @@ module spi_master
     output reg spi_clk,  // Clock SPI gerado pelo master
     input  wire spi_miso, // Linha MISO (Master In, Slave Out)
     output reg spi_mosi // Linha MOSI (Master Out, Slave In)
+
+    // Interface SPI (todos os sinais relacionados operam no domínio do clock SPI)
+    wire w_CPOL;    // como o clock começa - estado ocioso
+    wire w_CPHA;   // se você lê no primeiro ou segundo movimento
 );

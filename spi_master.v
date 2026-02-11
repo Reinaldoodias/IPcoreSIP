@@ -24,8 +24,8 @@ module spi_master
 
 
     // Interface SPI (todos os sinais relacionados operam no domínio do clock SPI)
-    wire w_CPOL;    // como o clock começa - estado ocioso
-    wire w_CPHA;   // se você lê no primeiro ou segundo movimento
+    wire cpol;    // como o clock começa - estado ocioso
+    wire cpha;   // se você lê no primeiro ou segundo movimento
 
 
     // ================================
@@ -116,7 +116,6 @@ module spi_master
     // ================================
     // Registrador Interno de Transmissão
     // ================================
-
     always @(posedge clk or negedge rst_n)
     begin
         if (!rst_n)
@@ -132,5 +131,35 @@ module spi_master
                 registrador_tx <= tx_dado; // Carrega o dado de entrada no registrador de transmissão
         end
     end
+
+    // ================================
+    // Transmissão serial dos bits no barramento SPI (linha MOSI)
+    // ================================
+    always @(posedge clk or negedge rst_n)
+    begin
+        if (!rst_n)
+        begin
+            spi_mosi        <= 1'b0; // Força a linha MOSI para 0
+            contador_bit_tx <= 3'b111; // Inicializa contador no bit mais significativo (bit 7)
+        end
+        else
+        begin
+            if (tx_pronto) // Se a transmissão terminou
+                contador_bit_tx <= 3'b111; // Reinicia contador para próxima transmissão
+
+            else if (tx_valido_reg & ~cpha) // Se há dado válido e CPHA = 0 (modo 0 ou 2)
+            begin
+                spi_mosi        <= registrador_tx[3'b111]; // Envia primeiro o MSB
+                contador_bit_tx <= 3'b110; // Prepara próximo bit (bit 6)
+            end
+            else if ((borda_subida & cpha) | 
+                    (borda_descida & ~cpha)) // Atualiza dado conforme modo SPI (CPHA)
+            begin
+                spi_mosi        <= registrador_tx[contador_bit_tx]; // Envia bit atual
+                contador_bit_tx <= contador_bit_tx - 1'b1; //decrementa contador
+            end
+        end
+    end
+
 
 endmodule

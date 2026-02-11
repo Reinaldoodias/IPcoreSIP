@@ -113,4 +113,24 @@ module spi_master
         end
     end
 
+    // ================================
+    // Registrador Interno de Transmissão
+    // ================================
+
+    always @(posedge clk or negedge rst_n)
+    begin
+        if (!rst_n)
+        begin
+            registrador_tx <= 8'h00; // Zera o registrador de transmissão (8 bits)
+            tx_valido_reg  <= 1'b0; // Limpa o sinal que indica dado válido
+        end
+        else
+        begin
+            tx_valido_reg <= tx_valido; // Registra (sincroniza) o sinal tx_valido na borda de subida do clock
+
+            if (tx_valido)
+                registrador_tx <= tx_dado; // Carrega o dado de entrada no registrador de transmissão
+        end
+    end
+
 endmodule

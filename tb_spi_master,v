@@ -1,0 +1,112 @@
+`timescale 1ns/1ps
+
+module tb_spi_master;
+
+    // ================================
+    // Parâmetros
+    // ================================
+    parameter MODO_SPI = 3;   // <<< MODO 3
+    parameter CICLOS_POR_MEIO_BIT = 2;
+
+    // ================================
+    // Sinais
+    // ================================
+    reg clk;
+    reg rst_n;
+
+    reg  [7:0] tx_dado;
+    reg        tx_valido;
+    wire       tx_pronto;
+
+    wire [7:0] rx_dado;
+    wire       rx_valido;
+
+    wire spi_clk;
+    reg  spi_miso;
+    wire spi_mosi;
+
+    // ================================
+    // Instancia DUT
+    // ================================
+    spi_master #(
+        .MODO_SPI(MODO_SPI),
+        .CICLOS_POR_MEIO_BIT(CICLOS_POR_MEIO_BIT)
+    ) dut (
+        .clk(clk),
+        .rst_n(rst_n),
+        .tx_dado(tx_dado),
+        .tx_valido(tx_valido),
+        .tx_pronto(tx_pronto),
+        .rx_dado(rx_dado),
+        .rx_valido(rx_valido),
+        .spi_clk(spi_clk),
+        .spi_miso(spi_miso),
+        .spi_mosi(spi_mosi)
+    );
+
+    // ================================
+    // Clock 100 MHz
+    // ================================
+    initial clk = 0;
+    always #5 clk = ~clk;
+
+    // ================================
+    // VCD
+    // ================================
+    initial begin
+        $dumpfile("spi_master_modo3.vcd");
+        $dumpvars(0, tb_spi_master);
+    end
+
+    // ================================
+    // SLAVE SIMPLES (Modo 3)
+    // CPHA = 1 → dados mudam na subida
+    // ================================
+    reg [7:0] slave_data = 8'hA5;
+    integer i;
+
+    initial begin
+        spi_miso = 0;
+
+        wait(rst_n);
+        wait(tx_valido);
+
+        forever begin
+            // Em modo 3, mudamos o dado na borda de subida
+            for (i = 7; i >= 0; i = i - 1) begin
+                @(posedge spi_clk);
+                spi_miso = slave_data[i];
+            end
+        end
+    end
+
+    // ================================
+    // Estímulos
+    // ================================
+    initial begin
+
+        rst_n = 0;
+        tx_valido = 0;
+        tx_dado = 8'h00;
+
+        #20;
+        rst_n = 1;
+
+        #20;
+
+        // Envia 1º byte
+        @(posedge clk);
+        tx_dado   = 8'h3C;
+        tx_valido = 1;
+
+        @(posedge clk);
+        tx_valido = 0;
+
+        wait(rx_valido);
+
+        #100;
+
+        $finish;
+    end
+
+endmodule

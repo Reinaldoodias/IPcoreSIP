@@ -201,7 +201,4 @@ module spi_master
         else
             spi_clk <= clk_spi_interno; // Atualiza a saída do clock SPI com o clock interno gerado pelo módulo
     end
-
-
-
 endmodule

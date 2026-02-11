@@ -19,7 +19,9 @@ module spi_master
 
     output reg spi_clk,  // Clock SPI gerado pelo master
     input  wire spi_miso, // Linha MISO (Master In, Slave Out)
-    output reg spi_mosi // Linha MOSI (Master Out, Slave In)
+    output reg spi_mosi // Linha MOSI (Master Out, Slave In)]
+);
+
 
     // Interface SPI (todos os sinais relacionados operam no domínio do clock SPI)
     wire w_CPOL;    // como o clock começa - estado ocioso
@@ -53,4 +55,62 @@ module spi_master
     // Controla a montagem do byte recebido via MISO
     reg [2:0] contador_bit_rx;
 
-);
+    // ================================
+    // Geração do clock SPI e controle da transmissão
+    // ================================
+    always @(posedge clk or negedge rst_n)
+    begin
+        // Reset assíncrono ativo em nível baixo
+        if (!rst_n)
+        begin
+            tx_pronto        <= 1'b0;   // Indica que o SPI não está pronto após o reset
+            contador_bordas  <= 0;      // Zera o contador de bordas do clock SPI
+            borda_subida     <= 1'b0;   // Limpa flag de borda de subida
+            borda_descida    <= 1'b0;   // Limpa flag de borda de descida
+            clk_spi_interno  <= cpol;   // Inicializa o clock SPI conforme a polaridade (CPOL)
+            contador_clk     <= 0;      // Zera o divisor de clock
+        end
+        else
+        begin
+            // Flags de borda válidas por apenas um ciclo de clock
+            borda_subida  <= 1'b0;
+            borda_descida <= 1'b0;
+
+            // Início de uma nova transmissão
+            if (tx_valido)
+            begin
+                tx_pronto       <= 1'b0; // SPI ocupado
+                contador_bordas <= 16;   // 16 bordas para transmitir 8 bits
+            end
+            // Transmissão em andamento
+            else if (contador_bordas > 0)
+            begin
+                tx_pronto <= 1'b0; // SPI ocupado durante a transmissão
+
+                // Fim do período completo do clock SPI (borda de descida)
+                if (contador_clk == CICLOS_POR_MEIO_BIT*2-1)
+                begin
+                    contador_bordas <= contador_bordas - 1'b1; // Decrementa bordas restantes
+                    borda_descida   <= 1'b1;                    // Sinaliza borda de descida
+                    contador_clk    <= 0;                       // Reinicia contador de clock
+                    clk_spi_interno <= ~clk_spi_interno;        // Inverte o clock SPI
+                end
+                // Meio período do clock SPI (borda de subida)
+                else if (contador_clk == CICLOS_POR_MEIO_BIT-1)
+                begin
+                    contador_bordas <= contador_bordas - 1'b1; // Decrementa bordas restantes
+                    borda_subida    <= 1'b1;                    // Sinaliza borda de subida
+                    contador_clk    <= contador_clk + 1'b1;    // Avança contador
+                    clk_spi_interno <= ~clk_spi_interno;       // Inverte o clock SPI
+                end
+                // Contagem normal do divisor de clock
+                else
+                    contador_clk <= contador_clk + 1'b1;
+            end
+            // Fim da transmissão
+            else
+                tx_pronto <= 1'b1; // SPI pronto para novo dado
+        end
+    end
+
+endmodule

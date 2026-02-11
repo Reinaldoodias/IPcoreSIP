@@ -161,5 +161,36 @@ module spi_master
         end
     end
 
+    // ================================
+    // Transmissão serial dos bits no barramento SPI (linha MISO)
+    // ================================
+    always @(posedge clk or negedge rst_n)
+    begin
+        if (!rst_n)
+        begin
+            rx_dado         <= 8'h00; // Zera o registrador de recepção
+            rx_valido       <= 1'b0;  // Limpa o sinal que indica dado recebido válido
+            contador_bit_rx <= 3'b111; // Inicializa contador no bit mais significativo (bit 7)
+        end
+        else
+        begin
+            rx_valido <= 1'b0;
+
+            if (tx_pronto)
+                contador_bit_rx <= 3'b111;
+
+            else if ((borda_subida & ~cpha) |
+                    (borda_descida & cpha)) // Amostragem do MISO conforme modo SPI (CPHA)
+            begin
+                rx_dado[contador_bit_rx] <= spi_miso; // Armazena o bit recebido na posição correspondente
+                contador_bit_rx <= contador_bit_rx - 1'b1; // Decrementa o contador para o próximo bit
+
+                if (contador_bit_rx == 3'b000) // Se acabou de receber o último bit (bit 0)
+                    rx_valido <= 1'b1; // Sinaliza que o byte completo foi recebido
+            end
+        end
+    end
+
+
 
 endmodule

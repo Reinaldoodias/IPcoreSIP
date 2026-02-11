@@ -191,6 +191,17 @@ module spi_master
         end
     end
 
+    // ================================
+    // controlar a saída do clock SPI (spi_clk)
+    // ================================
+    always @(posedge clk or negedge rst_n)
+    begin
+        if (!rst_n)
+            spi_clk <= cpol; // Inicializa o clock SPI no nível definido por CPOL (nível ocioso do clock)
+        else
+            spi_clk <= clk_spi_interno; // Atualiza a saída do clock SPI com o clock interno gerado pelo módulo
+    end
+
 
 
 endmodule

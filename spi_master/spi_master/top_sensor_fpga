@@ -1,0 +1,53 @@
+module top_sensor_fpga (
+    input  wire clk,        // Clock de 50MHz do Cyclone II
+    input  wire rst_n,      // Botão de Reset
+    input  wire spi_miso,   // Pino MISO vindo do sensor
+    output wire spi_clk,    // Clock SPI para o sensor
+    output wire spi_mosi,   // Comando MOSI para o sensor
+    output wire spi_cs_n,   // Seleção do chip (CS)
+    output wire [7:0] leds  // LEDs do FPGA para refletir a iluminação
+);
+
+    wire [7:0] dado_sensor;
+    wire rx_valido;
+    reg  tx_en;
+    reg [23:0] timer_leitura; // Contador para controlar a taxa de atualização
+
+    // Instanciação do IP Core SPI configurado para o sensor [cite: 137]
+    spi_master #(
+        .MODO_SPI(0),            // Define o modo (0-3) conforme o datasheet do seu sensor
+        .CICLOS_POR_MEIO_BIT(50) // Define a velocidade (50 = ~500kHz para clk de 50MHz)
+    ) interface_sensor (
+        .clk(clk),
+        .rst_n(rst_n),
+        .tx_dado(8'h00),         // Envia comando zero (ou o comando de leitura do sensor)
+        .tx_valido(tx_en),
+        .tx_pronto(),            // Verificação interna
+        .rx_dado(dado_sensor),   // Dado que vem do sensor
+        .rx_valido(rx_valido),
+        .spi_clk(spi_clk),
+        .spi_miso(spi_miso),
+        .spi_mosi(spi_mosi),
+        .spi_cs_n(spi_cs_n)
+    );
+
+    // Reflete o dado recebido nos LEDs do Cyclone II [cite: 135, 151]
+    assign leds = dado_sensor;
+
+    // Lógica para disparar uma nova leitura a cada ~0.2 segundos
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            timer_leitura <= 0;
+            tx_en <= 1'b0;
+        end else begin
+            if (timer_leitura == 24'd10_000_000) begin // Intervalo de tempo
+                tx_en <= 1'b1; // Pulso para iniciar transmissão SPI
+                timer_leitura <= 0;
+            end else begin
+                tx_en <= 1'b0;
+                timer_leitura <= timer_leitura + 1'b1;
+            end
+        end
+    end
+
+endmodule

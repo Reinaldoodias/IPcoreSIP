@@ -1,0 +1,90 @@
+`timescale 1ns / 1ps
+
+module tb_spi_master;
+
+    // ================================
+    // Parâmetros de Teste
+    // ================================
+    parameter MODO = 0;               // Testando o Modo SPI 0 (CPOL=0, CPHA=0) [cite: 346]
+    parameter CICLOS_BIT = 4;         // Frequência reduzida para facilitar a visualização
+    
+    // Sinais de estímulo (Entradas do Mestre)
+    reg clk;
+    reg rst_n;
+    reg [7:0] tx_dado;
+    reg tx_valido;
+    reg spi_miso;
+
+    // Sinais de monitoramento (Saídas do Mestre)
+    wire tx_pronto;
+    wire [7:0] rx_dado;
+    wire rx_valido;
+    wire spi_clk;
+    wire spi_mosi;
+    wire spi_cs_n;
+
+    // ================================
+    // Instanciação do Módulo Principal (UUT)
+    // ================================
+    spi_master #(
+        .MODO_SPI(MODO),
+        .CICLOS_POR_MEIO_BIT(CICLOS_BIT)
+    ) uut (
+        .clk(clk),
+        .rst_n(rst_n),
+        .tx_dado(tx_dado),
+        .tx_valido(tx_valido),
+        .tx_pronto(tx_pronto),
+        .rx_dado(rx_dado),
+        .rx_valido(rx_valido),
+        .spi_clk(spi_clk),
+        .spi_miso(spi_miso),
+        .spi_mosi(spi_mosi),
+        .spi_cs_n(spi_cs_n)
+    );
+
+    // ================================
+    // Geração do Clock do Sistema (50MHz nominal)
+    // ================================
+    always #10 clk = ~clk; // Período de 20ns
+
+    // ================================
+    // Procedimento de Teste
+    // ================================
+    initial begin
+        // --- Inicialização dos Sinais ---
+        clk = 0;
+        rst_n = 0;
+        tx_dado = 8'h00;
+        tx_valido = 0;
+        spi_miso = 0;
+
+        // --- Aplicação de Reset ---
+        #50 rst_n = 1; 
+        #50;
+
+        // --- Início da Transmissão (Enviando 8'hA5 - 10100101) ---
+        wait(tx_pronto);          // Aguarda o IP Core estar livre [cite: 303]
+        tx_dado = 8'hA5;          // Carrega o dado no registrador de carga [cite: 304]
+        tx_valido = 1;            // Sinaliza dado pronto para envio
+        #20 tx_valido = 0;        // Desativa pulso de validação
+
+        // --- Simulação de Resposta do Escravo (MISO) ---
+        // O mestre lê o MISO conforme a borda definida pelo CPHA [cite: 346, 356]
+        @(negedge spi_cs_n);      // Detecta quando o mestre ativa o escravo
+
+        // Enviando bits pelo MISO sincronizados com o relógio SPI
+        repeat(8) begin
+            @(posedge spi_clk);   // Simula dado mudando na borda oposta à amostragem
+            #5 spi_miso = ~spi_miso; // Alterna bits recebidos para teste
+        end
+
+        // --- Verificação Final ---
+        wait(rx_valido);          // Aguarda sinal de conclusão de recepção [cite: 306]
+        $display("Teste Concluido. Dado recebido: %h", rx_dado);
+        
+        #200;
+        $stop;                    // Encerra simulação no QuestaSim [cite: 193]
+    end
+
+endmodule

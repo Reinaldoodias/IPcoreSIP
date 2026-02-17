@@ -1,0 +1,177 @@
+module spi_master
+#(
+    parameter MODO_SPI = 0, // Parâmetro que define o modo de operação do SPI (0, 1, 2 ou 3)
+
+    // Número de ciclos de clock do sistema para cada meio período do clock SPI
+    // Controla a frequência do spi_clk
+    parameter CICLOS_POR_MEIO_BIT = 25 
+)
+(
+    input  wire clk,      // Clock do sistema (ex: 50MHz no Cyclone II)
+    input  wire rst_n,    // Reset ativo em nível baixo
+
+    input  wire [7:0] tx_dado,   // Dado a ser transmitido (8 bits)
+    input  wire       tx_valido, // Indica que o dado de transmissão é válido
+    output reg        tx_pronto, // Indica que o módulo está pronto para receber um novo dado
+
+    output reg  [7:0] rx_dado,   // Dado recebido
+    output reg        rx_valido, // Indica que o dado recebido é valido
+
+    output reg  spi_clk,   // Clock SPI gerado pelo master
+    input  wire spi_miso,  // Linha MISO (Master In, Slave Out)
+    output reg  spi_mosi,  // Linha MOSI (Master Out, Slave In)
+    output reg  spi_cs_n   // Chip Select: Ativa o sensor (Adicionado para suporte a hardware real)
+);
+
+    // Interface SPI (todos os sinais relacionados operam no domínio do clock SPI) [cite: 226]
+    // Atribuição baseada no parâmetro MODO_SPI para suportar as 4 combinações [cite: 180]
+    wire cpol = MODO_SPI[1]; // como o clock começa - estado ocioso [cite: 346, 347]
+    wire cpha = MODO_SPI[0]; // se você lê no primeiro ou segundo movimento [cite: 346, 347]
+
+    // ================================
+    // Registradores e contadores
+    // ================================
+    reg [$clog2(CICLOS_POR_MEIO_BIT*2):0] contador_clk;
+    reg [4:0] contador_bordas; // Conta o número de bordas do clock SPI (subida + descida)
+
+    reg clk_spi_interno; // Clock SPI interno antes de ser enviado para o pino spi_clk
+    reg borda_subida;    // Indica quando ocorreu uma borda de subida do clock SPI
+    reg borda_descida;   // Indica quando ocorreu uma borda de descida do clock SPI
+
+    // Registrador que armazena o byte a ser transmitido via MOSI
+    // Funciona como um shift register durante a transmissão [cite: 231, 318]
+    reg [7:0] registrador_tx;
+
+    // Contador de bits transmitidos (0 a 7)
+    // Controla qual bit do registrador_tx está sendo enviado [cite: 288]
+    reg [2:0] contador_bit_tx;
+
+    // Contador de bits recebidos (0 a 7)
+    // Controla a montagem do byte recebido via MISO [cite: 296]
+    reg [2:0] contador_bit_rx;
+
+    // ================================
+    // Geração do clock SPI e controle da transmissão [cite: 282, 322]
+    // ================================
+    always @(posedge clk or negedge rst_n)
+    begin
+        // Reset assíncrono ativo em nível baixo
+        if (!rst_n)
+        begin
+            tx_pronto       <= 1'b1;   // Indica que o SPI está pronto após o reset
+            contador_bordas  <= 0;      // Zera o contador de bordas do clock SPI
+            borda_subida     <= 1'b0;   // Limpa flag de borda de subida
+            borda_descida    <= 1'b0;   // Limpa flag de borda de descida
+            clk_spi_interno  <= cpol;   // Inicializa o clock SPI conforme a polaridade (CPOL) [cite: 298]
+            contador_clk     <= 0;      // Zera o divisor de clock
+            spi_cs_n         <= 1'b1;   // Desativa o Slave (CS em nível alto) 
+        end
+        else
+        begin
+            borda_subida  <= 1'b0;
+            borda_descida <= 1'b0;
+
+            // Início de uma nova transmissão
+            if (tx_valido && tx_pronto)
+            begin
+                tx_pronto       <= 1'b0; // SPI ocupado
+                spi_cs_n        <= 1'b0; // Ativa o Slave para iniciar a conversa
+                contador_bordas <= 16;   // 16 bordas para transmitir 8 bits [cite: 305]
+                contador_clk    <= 0;
+            end
+            // Transmissão em andamento
+            else if (contador_bordas > 0)
+            begin
+                tx_pronto <= 1'b0; 
+
+                // Fim do período completo do clock SPI (borda de descida)
+                if (contador_clk == CICLOS_POR_MEIO_BIT*2-1)
+                begin
+                    contador_bordas <= contador_bordas - 1'b1; 
+                    borda_descida   <= 1'b1;                   
+                    contador_clk    <= 0;                      
+                    clk_spi_interno <= ~clk_spi_interno;       // Inverte o clock SPI
+                end
+                // Meio período do clock SPI (borda de subida)
+                else if (contador_clk == CICLOS_POR_MEIO_BIT-1)
+                begin
+                    contador_bordas <= contador_bordas - 1'b1; 
+                    borda_subida    <= 1'b1;                   
+                    contador_clk    <= contador_clk + 1'b1;    
+                    clk_spi_interno <= ~clk_spi_interno;       // Inverte o clock SPI
+                end
+                else
+                    contador_clk <= contador_clk + 1'b1;
+            end
+            // Fim da transmissão
+            else
+            begin
+                tx_pronto <= 1'b1; 
+                spi_cs_n  <= 1'b1; // Libera o Slave (CS volta para alto)
+                clk_spi_interno <= cpol; // Retorna ao estado ocioso definido por CPOL
+            end
+        end
+    end
+
+    // ================================
+    // Transmissão serial dos bits no barramento SPI (linha MOSI) [cite: 231, 287]
+    // ================================
+    always @(posedge clk or negedge rst_n)
+    begin
+        if (!rst_n)
+        begin
+            spi_mosi        <= 1'b0; // Força a linha MOSI para 0
+            contador_bit_tx <= 3'b111; 
+        end
+        else
+        begin
+            if (tx_valido && tx_pronto) 
+            begin
+                registrador_tx  <= tx_dado; // Carrega o dado no registrador de transmissão [cite: 304]
+                contador_bit_tx <= 3'b111; // Reinicia contador no bit mais significativo (bit 7)
+            end
+            // Atualiza dado conforme o modo (CPHA) [cite: 346, 347]
+            else if ((borda_subida && (cpha == 1'b1)) || (borda_descida && (cpha == 1'b0)))
+            begin
+                spi_mosi        <= registrador_tx[contador_bit_tx]; // Envia bit atual
+                contador_bit_tx <= contador_bit_tx - 1'b1; // Decrementa contador
+            end
+        end
+    end
+
+    // ================================
+    // Recepção serial dos bits no barramento SPI (linha MISO) [cite: 231, 287]
+    // ================================
+    always @(posedge clk or negedge rst_n)
+    begin
+        if (!rst_n)
+        begin
+            rx_dado         <= 8'h00; // Zera o registrador de recepção
+            rx_valido       <= 1'b0;  // Limpa o sinal que indica dado recebido válido
+            contador_bit_rx <= 3'b111; 
+        end
+        else
+        begin
+            rx_valido <= 1'b0;
+
+            // Amostragem do MISO conforme o modo (CPHA) [cite: 344]
+            if ((borda_subida && (cpha == 1'b0)) || (borda_descida && (cpha == 1'b1)))
+            begin
+                rx_dado[contador_bit_rx] <= spi_miso; // Armazena o bit recebido
+                contador_bit_rx <= contador_bit_rx - 1'b1; 
+
+                if (contador_bit_rx == 3'b000) 
+                    rx_valido <= 1'b1; // Sinaliza que o byte completo foi recebido [cite: 306]
+            end
+        end
+    end
+
+    // ================================
+    // Controlar a saída do clock SPI (spi_clk)
+    // ================================
+    always @(posedge clk)
+    begin
+        spi_clk <= clk_spi_interno; // Atualiza a saída física com o clock interno
+    end
+
+endmodule

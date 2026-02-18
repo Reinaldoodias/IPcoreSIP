@@ -1,0 +1,106 @@
+module spi_core #(
+    parameter MODO_SPI      = 0, // CPOL e CPHA (0 a 3) 
+    parameter LARGURA_DADOS = 8, // Parametrização da largura de palavra 
+    parameter PRESCALER_VAL = 25,// Frequência do SCLK 
+    parameter MODO_MESTRE   = 1  // 1 para Mestre, 0 para Escravo 
+) (
+    input  wire clk,      // Clock do sistema
+    input  wire rst_n,    // Reset ativo baixo
+    
+    // Interface com o Sistema (Lógica Interna)
+    input  wire [LARGURA_DADOS-1:0] tx_dado,
+    input  wire tx_valido,
+    output reg  tx_pronto,
+    output reg  [LARGURA_DADOS-1:0] rx_dado,
+    output reg  rx_valido,
+
+    // Interface Física (Pinos do FPGA)
+    output reg  spi_clk,
+    input  wire spi_miso,
+    output reg  spi_mosi,
+    output reg  spi_cs_n
+);
+
+    // Definição dos Estados da FSM conforme o TCC 
+    localparam IDLE     = 2'b00; // Repouso
+    localparam LOAD     = 2'b01; // Carga de dados
+    localparam TRANSFER = 2'b10; // Transmissão ativa
+    localparam DONE     = 2'b11; // Conclusão
+
+    reg [1:0] estado_atual, proximo_estado;
+    reg [LARGURA_DADOS-1:0] shift_reg;
+    reg [$clog2(LARGURA_DADOS*2):0] bit_cnt;
+    reg [$clog2(PRESCALER_VAL*2):0] clk_cnt;
+    
+    wire cpol = MODO_SPI[1];
+    wire cpha = MODO_SPI[0];
+
+    // Transição de Estados
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) estado_atual <= IDLE;
+        else estado_atual <= proximo_estado;
+    end
+
+    // Lógica Combinacional de Próximo Estado 
+    always @(*) begin
+        case (estado_atual)
+            IDLE:     if (tx_valido) proximo_estado = LOAD;
+                      else proximo_estado = IDLE;
+            LOAD:     proximo_estado = TRANSFER;
+            TRANSFER: if (bit_cnt == 0) proximo_estado = DONE;
+                      else proximo_estado = TRANSFER;
+            DONE:     proximo_estado = IDLE;
+            default:  proximo_estado = IDLE;
+        endcase
+    end
+
+    // Unidade de Controle e Caminho de Dados 
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            tx_pronto <= 1'b1;
+            spi_clk   <= cpol;
+            spi_cs_n  <= 1'b1;
+            rx_valido <= 1'b0;
+        end else begin
+            case (estado_atual)
+                IDLE: begin
+                    tx_pronto <= 1'b1;
+                    spi_cs_n  <= 1'b1;
+                    spi_clk   <= cpol;
+                    rx_valido <= 1'b0;
+                end
+
+                LOAD: begin
+                    shift_reg <= tx_dado;
+                    bit_cnt   <= LARGURA_DADOS * 2;
+                    clk_cnt   <= 0;
+                    tx_pronto <= 1'b0;
+                    spi_cs_n  <= 1'b0;
+                end
+
+                TRANSFER: begin
+                    if (clk_cnt == PRESCALER_VAL - 1) begin
+                        clk_cnt <= 0;
+                        bit_cnt <= bit_cnt - 1;
+                        spi_clk <= ~spi_clk;
+                        
+                        // Lógica de Amostragem e Troca baseada em CPHA 
+                        if ((!spi_clk && !cpha) || (spi_clk && cpha)) begin
+                            spi_mosi <= shift_reg[LARGURA_DADOS-1];
+                            shift_reg <= {shift_reg[LARGURA_DADOS-2:0], spi_miso};
+                        end
+                    end else begin
+                        clk_cnt <= clk_cnt + 1;
+                    end
+                end
+
+                DONE: begin
+                    rx_dado   <= shift_reg;
+                    rx_valido <= 1'b1;
+                    tx_pronto <= 1'b1;
+                    spi_cs_n  <= 1'b1;
+                end
+            endcase
+        end
+    end
+endmodule

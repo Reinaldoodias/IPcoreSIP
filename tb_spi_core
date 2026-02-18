@@ -1,0 +1,36 @@
+`timescale 1ns / 1ps
+module tb_spi_core;
+    parameter D_WIDTH = 12; // Testando com 12 bits para validar a parametrização
+    
+    reg clk, rst_n, tx_valido, spi_miso;
+    reg [D_WIDTH-1:0] tx_dado;
+    wire [D_WIDTH-1:0] rx_dado;
+    wire tx_pronto, rx_valido, spi_clk, spi_mosi, spi_cs_n;
+
+    spi_core #(.LARGURA_DADOS(D_WIDTH), .MODO_SPI(0)) uut (
+        .clk(clk), .rst_n(rst_n), .tx_dado(tx_dado), .tx_valido(tx_valido),
+        .tx_pronto(tx_pronto), .rx_dado(rx_dado), .rx_valido(rx_valido),
+        .spi_clk(spi_clk), .spi_miso(spi_miso), .spi_mosi(spi_mosi), .spi_cs_n(spi_cs_n)
+    );
+
+    always #10 clk = ~clk;
+
+    initial begin
+        clk = 0; rst_n = 0; tx_valido = 0; spi_miso = 0;
+        #50 rst_n = 1;
+        
+        wait(tx_pronto);
+        tx_dado = 12'hA5C; // Dado de 12 bits
+        tx_valido = 1;
+        #20 tx_valido = 0;
+
+        repeat(24) begin // 12 bits * 2 bordas
+            @(posedge spi_clk or negedge spi_clk);
+            spi_miso = ~spi_miso;
+        end
+
+        wait(rx_valido);
+        $display("Sucesso: Recebido %h", rx_dado);
+        #100 $stop;
+    end
+endmodule

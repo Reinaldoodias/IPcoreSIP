@@ -1,0 +1,42 @@
+module top_sensor_fpga (
+    input  wire clk,        // 50MHz
+    input  wire rst_n,
+    input  wire spi_miso,
+    output wire spi_clk,
+    output wire spi_mosi,
+    output wire spi_cs_n,
+    output wire [7:0] leds  // Visualização da iluminação
+);
+    wire [7:0] lux_data;
+    wire pronto, valido;
+    reg  start_read;
+    reg [23:0] timer;
+
+    // Instanciação do IP Core ajustado
+    spi_core #(
+        .MODO_SPI(0),      // Conforme datasheet do sensor
+        .LARGURA_DADOS(8), // Sensor comum de 8 bits
+        .PRESCALER_VAL(50) // SCLK ~500kHz
+    ) sensor_ctrl (
+        .clk(clk), .rst_n(rst_n),
+        .tx_dado(8'h00), .tx_valido(start_read), .tx_pronto(pronto),
+        .rx_dado(lux_data), .rx_valido(valido),
+        .spi_clk(spi_clk), .spi_miso(spi_miso), .spi_mosi(spi_mosi), .spi_cs_n(spi_cs_n)
+    );
+
+    assign leds = lux_data; // Exibe nível de luz nos LEDs
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            timer <= 0; start_read <= 0;
+        end else begin
+            if (timer == 24'd5_000_000) begin // Taxa de amostragem
+                if (pronto) start_read <= 1;
+                timer <= 0;
+            end else begin
+                start_read <= 0;
+                timer <= timer + 1;
+            end
+        end
+    end
+endmodule
